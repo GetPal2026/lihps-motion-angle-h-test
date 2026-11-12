@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f7f9fc" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Motion Angle" />
+  <meta name="description" content="LIHPS experimental motion and angle measurement app." />
+  <meta name="color-scheme" content="light" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icons/icon-180.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+  <title>Motion Angle · LIHPS</title>
+  <script defer type="module" src="./app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="brand-copy"><div class="eyebrow">LIHPS · MOTION LAB</div><div class="brand-name">Motion<span>Angle</span></div></div>
+      <div class="version-chip">BETA 0.3</div>
+    </header>
+
+    <main>
+      <div class="sensor-banner" id="sensor-banner" role="status">
+        <span class="status-dot" id="sensor-dot"></span>
+        <div class="sensor-banner-copy"><b id="sensor-status">Sensors not enabled</b><small id="sensor-explainer">Grant access to begin measuring on your iPhone.</small></div>
+        <button id="sensor-enable" class="small-button" type="button">Enable</button>
+      </div>
+      <div class="notice error" id="global-warning" hidden role="alert"></div>
+
+      <section class="screen active" id="screen-trunk" aria-label="Trunk rotation">
+        <div class="section-head"><div><div class="eyebrow blue">MEASUREMENT 01</div><h1>Trunk rotation</h1><p class="subhead">Relative rotation around Earth's vertical axis.</p></div></div>
+        <div class="choice-row" role="group" aria-label="Planned rotation direction">
+          <span class="choice-label">Trial direction</span>
+          <div class="segmented" id="direction-options">
+            <button type="button" class="selected" data-direction="unspecified" aria-pressed="true">Either</button>
+            <button type="button" data-direction="left" aria-pressed="false">Left</button>
+            <button type="button" data-direction="right" aria-pressed="false">Right</button>
+          </div>
+        </div>
+
+        <button type="button" class="measure-surface" id="trunk-tap" aria-label="Start a trunk rotation trial" disabled>
+          <div class="tap-upper"><span id="trunk-phase">READY TO MEASURE</span><span class="live-indicator" id="trunk-live" hidden>● LIVE</span></div>
+          <div class="metric-main"><span class="metric-number" id="trunk-peak">0.0</span><span class="metric-unit">°</span></div>
+          <div class="metric-caption" id="trunk-metric-label">PEAK EXCURSION</div>
+          <div class="angle-meter" aria-hidden="true"><div id="angle-meter-fill"></div></div>
+          <div class="metric-pair">
+            <div><small>CURRENT</small><strong id="trunk-current">+0.0°</strong></div>
+            <div><small>MAX PHONE TILT</small><strong id="trunk-tilt">—</strong></div>
+          </div>
+          <div class="tap-command" id="trunk-command">Enable motion sensors to begin</div>
+          <div class="tap-subcommand" id="trunk-command-detail">Screen upward · long edge against sternum</div>
+        </button>
+        <div class="notice quality" id="trunk-quality">Position the phone screen-up against the sternum. Stabilise the pelvis as required by your test protocol.</div>
+        <div class="stat-header"><h2>Current session</h2><button type="button" class="text-button" id="new-session">New session</button></div>
+        <div class="session-stats">
+          <div><small>Trials</small><strong id="stat-count">0</strong></div>
+          <div><small>Mean peak</small><strong id="stat-mean">—</strong></div>
+          <div><small>Range</small><strong id="stat-range">—</strong></div>
+        </div>
+        <div class="recent-list" id="recent-trunk"><div class="empty-inline">No recorded trials yet.</div></div>
+        <button type="button" class="secondary-button full" id="discard-trunk" hidden>Discard last trial</button>
+      </section>
+
+      <section class="screen" id="screen-joint" aria-label="Joint and limb angles" hidden>
+        <div class="section-head"><div class="eyebrow blue">MEASUREMENT 02</div><h1>Joint &amp; limb angles</h1><p class="subhead">Orientation and planar angle tools.</p></div>
+        <div class="tool-tabs" role="group" aria-label="Joint tool">
+          <button type="button" class="selected" data-tool="inclinometer" aria-pressed="true">Inclinometer</button>
+          <button type="button" data-tool="rom" aria-pressed="false">ROM from zero</button>
+          <button type="button" data-tool="segments" aria-pressed="false">2 segments</button>
+        </div>
+
+        <div class="joint-tool" id="tool-inclinometer">
+          <div class="section-note">Align the phone edge with the body segment. The signed result is relative to horizontal in the phone's measurement plane.</div>
+          <div class="choice-row"><span class="choice-label">Aligned edge</span><div class="segmented" id="inclino-edge"><button type="button" class="selected" data-edge="long" aria-pressed="true">Long</button><button type="button" data-edge="short" aria-pressed="false">Short</button></div></div>
+          <div class="display-panel"><div class="eyebrow">SEGMENT INCLINATION</div><div class="display-angle"><span id="inclino-angle">—</span><span class="metric-unit">°</span></div><div class="display-label">Signed angle relative to horizontal</div><div class="hairline"></div><div class="metric-pair"><div><small>ABSOLUTE</small><strong id="inclino-absolute">—</strong></div><div><small>OUT-OF-PLANE</small><strong id="inclino-oop">—</strong></div></div></div>
+          <button class="primary-button full" type="button" id="capture-inclinometer" disabled>Record angle</button>
+          <div class="notice quality" id="inclino-quality">Avoid moving the iPhone while reading the angle.</div>
+        </div>
+
+        <div class="joint-tool" id="tool-rom" hidden>
+          <div class="section-note">Rotation from a zeroed phone orientation. X/Y/Z are device-axis angles—not anatomical joint rotations.</div>
+          <button class="measure-surface rom-surface" type="button" id="rom-tap" disabled>
+            <div class="tap-upper"><span id="rom-phase">READY TO MEASURE</span><span id="rom-live" class="live-indicator" hidden>● LIVE</span></div>
+            <div class="metric-main"><span class="metric-number" id="rom-magnitude">0.0</span><span class="metric-unit">°</span></div>
+            <div class="metric-caption">PEAK 3D ROTATION MAGNITUDE</div>
+            <div class="axis-grid"><div><small>X · BETA</small><strong id="rom-x">0.0°</strong></div><div><small>Y · GAMMA</small><strong id="rom-y">0.0°</strong></div><div><small>Z · ALPHA</small><strong id="rom-z">0.0°</strong></div></div>
+            <div class="tap-command" id="rom-command">Enable sensors to begin</div>
+            <div class="tap-subcommand" id="rom-detail">Zero → move → tap to save peak</div>
+          </button>
+          <div class="notice quality">Individual X/Y/Z peaks are independent and may occur at different times. The 3D magnitude is calculated from relative quaternion orientation.</div>
+        </div>
+
+        <div class="joint-tool" id="tool-segments" hidden>
+          <div class="section-note">For a static angle between segments in the same measurement plane. Keep phone alignment and facing direction consistent.</div>
+          <div class="choice-row"><span class="choice-label">Aligned edge</span><div class="segmented" id="segment-edge"><button type="button" class="selected" data-edge="long" aria-pressed="true">Long</button><button type="button" data-edge="short" aria-pressed="false">Short</button></div></div>
+          <div class="display-panel"><div class="eyebrow" id="segments-title">PLACE ON PROXIMAL SEGMENT</div><div class="display-angle"><span id="segments-angle">—</span><span class="metric-unit">°</span></div><div class="display-label" id="segments-label">Inclinometer reading</div><div class="hairline"></div><div class="metric-pair"><div><small>PROXIMAL</small><strong id="segments-proximal">—</strong></div><div><small>DISTAL</small><strong id="segments-distal">—</strong></div></div></div>
+          <button type="button" class="primary-button full" id="segments-capture" disabled>Capture proximal segment</button>
+          <button type="button" class="text-button full" id="segments-reset">Reset two-segment measurement</button>
+          <div class="notice quality" id="segments-quality">Not a 3D joint-angle measurement. Angles can be misleading if the segments do not lie in one plane or phone placement changes.</div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-askling" aria-labelledby="h-title" hidden>
+        <header class="section-head">
+          <h1 id="h-title">Askling H-Test</h1>
+          <p class="subhead">Straight-leg raise · iPhone IMU</p>
+        </header>
+        <details class="h-card">
+          <summary>Protocol and mounting</summary>
+          <ol>
+            <li>With the athlete supine, secure the upper body and opposite leg. Brace the tested knee in full extension (0°). Use no warm-up exercises.</li>
+            <li>Perform the passive flexibility assessment first. Slowly raise the straight leg until the athlete reports a strong but tolerable stretch.</li>
+            <li>Firmly secure the iPhone to the brace, screen facing up at rest, long edge aligned with the shin, top of phone toward the ankle. Verify retention before testing. Enable iPhone Portrait Orientation Lock if needed.</li>
+            <li>Use one submaximal practice raise, then consecutive scored raises as fast and high as the athlete can safely perform. Return to the start between raises. If comparing injured and uninjured sides, test the uninjured side first.</li>
+            <li>Record pain and insecurity after each set. Stop if the athlete reports symptoms requiring the test to stop or the mount shifts.</li>
+          </ol>
+          <p>Results estimate leg excursion relative to the starting position with the pelvis stabilised. Use within a clinician-supervised assessment. The app provides no return-to-sport decision.</p>
+        </details>
+        <div class="h-card">
+          <div class="h-fields">
+            <label>Tested leg <select id="h-side"><option>Left</option><option>Right</option></select></label>
+            <label>Scored raises <select id="h-target"><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
+          </div>
+          <p id="h-protocol-note" class="section-note" hidden>Modified protocol (three scored raises is the default).</p>
+          <button class="primary-button full" id="h-start" type="button">Arm practice</button>
+          <button class="secondary-button full" id="h-stop" type="button" hidden>Stop capture</button>
+          <p id="h-status" class="notice quality" role="status">Enable sensors, complete the passive assessment and keep the leg still at the start.</p>
+          <form id="h-review" hidden>
+            <h2>Set review</h2>
+            <div id="h-result"></div>
+            <fieldset class="h-vas">
+              <legend>Pain VAS</legend>
+              <input id="h-pain-range" type="range" min="0" max="100" value="50" aria-label="Pain VAS slider">
+              <div class="h-vas-anchors"><span>0 · None</span><span>100 · Maximum imaginable</span></div>
+              <label>Score <input id="h-pain" type="number" min="0" max="100" step="1" required></label>
+            </fieldset>
+            <fieldset class="h-vas">
+              <legend>Insecurity VAS</legend>
+              <input id="h-insecurity-range" type="range" min="0" max="100" value="50" aria-label="Insecurity VAS slider">
+              <div class="h-vas-anchors"><span>0 · None</span><span>100 · Maximum imaginable</span></div>
+              <label>Score <input id="h-insecurity" type="number" min="0" max="100" step="1" required></label>
+            </fieldset>
+            <div class="records-actions">
+              <button class="primary-button" type="submit">Save set</button>
+              <button class="secondary-button" id="h-discard" type="button">Discard</button>
+            </div>
+          </form>
+        </div>
+        <div class="h-card">
+          <h2>Saved H-Test sets</h2>
+          <div class="records-actions">
+            <button class="secondary-button" id="h-new" type="button">New session</button>
+            <button class="primary-button" id="h-export" type="button">Export H-Test CSV</button>
+          </div>
+          <div id="h-history"></div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-records" aria-label="Saved measurements" hidden>
+        <div class="section-head"><div class="eyebrow blue">LOCAL RECORDS</div><h1>Measurements</h1><p class="subhead">Stored on this device only. Export regularly.</p></div>
+        <div class="records-actions"><button type="button" class="primary-button" id="export-csv">Export CSV</button><button type="button" class="secondary-button" id="clear-records">Delete all</button></div>
+        <div class="record-note" id="record-count">0 local records</div>
+        <div class="records-list" id="records-list"><div class="empty-inline">No measurements recorded yet.</div></div>
+        <div class="notice quality">Browser storage is not a validated clinical record system. Clearing website data or reinstalling may delete locally stored trials. No athlete-identifying data is collected.</div>
+      </section>
+
+      <section class="screen" id="screen-info" aria-label="Setup and diagnostics" hidden>
+        <div class="section-head"><div class="eyebrow blue">SETUP &amp; VALIDATION</div><h1>Device diagnostics</h1><p class="subhead">Check compatibility before clinical testing.</p></div>
+        <div class="diagnostic-card">
+          <div class="diagnostic-row"><span>Secure context (HTTPS)</span><b id="diag-https">—</b></div>
+          <div class="diagnostic-row"><span>Orientation API</span><b id="diag-orient-api">—</b></div>
+          <div class="diagnostic-row"><span>Motion API</span><b id="diag-motion-api">—</b></div>
+          <div class="diagnostic-row"><span>Received orientation</span><b id="diag-last">—</b></div>
+          <div class="diagnostic-row"><span>Sample frequency (approx.)</span><b id="diag-rate">—</b></div>
+          <div class="diagnostic-row"><span>Orientation absolute flag</span><b id="diag-absolute">—</b></div>
+          <div class="diagnostic-row"><span>Screen tilt</span><b id="diag-tilt">—</b></div>
+          <div class="diagnostic-row"><span>Observed heading spread (10 s)</span><b id="diag-jitter">—</b></div>
+          <div class="diagnostic-row"><span>App / data version</span><b>0.3.0 / 1</b></div>
+        </div>
+        <button class="secondary-button full" type="button" id="enable-again">Request sensor access</button>
+        <div class="howto"><h2>Positioning: trunk rotation</h2><p>Seated. Screen facing upward. Place one long edge of the iPhone against the sternum. Keep the device against the thorax and minimise independent arm movement. Stabilise the pelvis according to your protocol.</p><h2>Interpretation</h2><p>The trunk mode measures rotation of the phone's long axis projected onto the horizontal plane. It does not measure thorax–pelvis separation. Joint ROM from zero describes phone orientation, not automatically anatomical joint angles.</p><h2>Sensor limitations</h2><p>Web APIs may use an arbitrary or magnetic orientation reference, update at varying rates, and be suspended when the app is backgrounded. A tilt warning threshold of 15° is a configurable engineering heuristic, not an established clinical cut-off.</p></div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Main navigation">
+      <button type="button" class="nav-item selected" data-screen="trunk" aria-current="page"><span class="nav-icon">↻</span>Trunk</button>
+      <button type="button" class="nav-item" data-screen="joint"><span class="nav-icon">∠</span>Joint</button>
+      <button type="button" class="nav-item" data-screen="askling"><span class="nav-icon" aria-hidden="true">↑</span>H-Test</button>
+      <button type="button" class="nav-item" data-screen="records"><span class="nav-icon">▤</span>Records</button>
+      <button type="button" class="nav-item" data-screen="info"><span class="nav-icon">◎</span>Setup</button>
+    </nav>
+    <footer class="app-footer">Experimental measurement tool · Not validated for clinical decision-making</footer>
+  </div>
+</body>
+</html>
