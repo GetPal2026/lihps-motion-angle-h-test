@@ -1,5 +1,5 @@
 import {rotationMatrix, validOrientation, wrap180} from './math.js';
-import {addVelocity, angularRate, legPitch, projectRate, Repetitions, resolveAxis, stableZero, summary} from './h-math.js';
+import {addOrientationVelocity, addVelocity, angularRate, captureFlags, legPitch, projectRate, Repetitions, resolveAxis, stableZero, summary} from './h-math.js';
 
 const KEY = 'lihps-askling-imu-v1';
 const SESSION = 'lihps-askling-imu-session-v1';
@@ -24,7 +24,11 @@ function showSet(container, set) {
   const stats = summary(reps);
   container.replaceChildren(element('p',
     `${reps.length}/${target} raises · ${stats.valid} QC accepted · ${state}`));
-  if (practiceFlags.length) container.append(element('p', `Practice QC: ${practiceFlags.join(', ')}`));
+  const practiceNotes = captureFlags(practiceFlags);
+  if (practiceNotes.length) container.append(element('p', `Practice QC: ${practiceNotes.join(', ')}`));
+  if (reps.some(rep => rep.speedSource === 'orientation')) {
+    container.append(element('p', 'Peak speed estimated from changes in flexion angle.'));
+  }
   if (reps.length) {
     const table = document.createElement('table');
     table.className = 'h-table';
@@ -33,7 +37,7 @@ function showSet(container, set) {
     const body = table.createTBody();
     reps.forEach((rep, i) => {
       const row = body.insertRow();
-      for (const value of [i + 1, number(rep.peak), number(rep.speed), rep.flags.join(', ') || 'Accepted']) {
+      for (const value of [i + 1, number(rep.peak), number(rep.speed), captureFlags(rep.flags).join(', ') || 'Accepted']) {
         row.insertCell().textContent = value;
       }
     });
@@ -49,7 +53,8 @@ function downloadHistory(sets) {
     'session_id','set_id','started_utc','side','target_reps','modified_protocol','set_status',
     'practice_qc','gyro_channel','gyro_sign','pain_vas','insecurity_vas','rep','peak_rom_deg','peak_flexion_deg_s',
     'duration_ms','orientation_gap_ms','orientation_off_axis_deg','gyro_hz','gyro_gap_ms','rep_qc',
-    'accepted_reps','best_rom_deg','mean_rom_deg','best_velocity_deg_s','mean_peak_velocity_deg_s'
+    'accepted_reps','best_rom_deg','mean_rom_deg','best_velocity_deg_s','mean_peak_velocity_deg_s',
+    'peak_velocity_source','peak_off_axis_gyro_deg_s','practice_off_axis_deg','practice_peak_off_axis_gyro_deg_s','practice_gyro_status'
   ]];
   for (const set of sets) {
     const stats = summary(set.reps);
@@ -57,7 +62,9 @@ function downloadHistory(sets) {
       set.session, set.id, set.started, set.side, set.target, set.target !== 3, set.state,
       set.practiceFlags.join('; '), set.axis?.channel, set.axis?.sign, set.pain, set.insecurity, rep ? index + 1 : null,
       rep?.peak, rep?.speed, rep?.duration, rep?.gap, rep?.offAxis, rep?.gyroHz, rep?.gyroGap,
-      rep?.flags.join('; '), stats.valid, stats.bestRom, stats.meanRom, stats.bestSpeed, stats.meanSpeed
+      rep?.flags.join('; '), stats.valid, stats.bestRom, stats.meanRom, stats.bestSpeed, stats.meanSpeed,
+      rep?.speedSource ?? (Number.isFinite(rep?.speed) ? 'gyroscope' : null),
+      rep?.offAxisSpeed, set.practiceOffAxis, set.practiceOffAxisSpeed, set.practiceGyroStatus
     ]));
   }
   const csv = rows.map(row => row.map(value => '"' + String(value ?? '').replaceAll('"', '""') + '"').join(',')).join('\r\n');
@@ -104,11 +111,29 @@ export function setupHTest({sensorsEnabled, prepareAudio, beep}) {
       if (!sets.length) $('history').append(element('p', 'No saved sets.'));
       for (const set of [...sets].reverse()) {
         const details = document.createElement('details');
-        details.append(element('summary', `${set.side} · ${new Date(set.started).toLocaleString()} · ${set.reps.length}/${set.target}`));
+        const when = new Date(set.started).toLocaleString();
+        details.append(element('summary', `${set.side} · ${when} · ${set.reps.length}/${set.target}`));
         const body = document.createElement('div');
         showSet(body, set);
         details.append(body, element('p',
           `Pain ${set.pain}/100 · Insecurity ${set.insecurity}/100 · Session ${set.session.slice(0, 8)}`));
+        const remove = element('button', 'Delete set');
+        remove.type = 'button';
+        remove.className = 'text-button bad-text';
+        remove.setAttribute('aria-label', `Delete ${set.side.toLowerCase()} set from ${when}`);
+        remove.addEventListener('click', () => {
+          if (!window.confirm(`Delete the ${set.side.toLowerCase()} H-Test set from ${when}?`)) return;
+          try {
+            localStorage.setItem(KEY, JSON.stringify(readHistory().filter(saved => saved.id !== set.id)));
+          } catch {
+            $('history-status').textContent = 'Could not delete the saved set.';
+            return;
+          }
+          history();
+          $('history-status').textContent = 'Set deleted.';
+          $('history-title').focus();
+        });
+        details.append(remove);
         $('history').append(details);
       }
     } catch {
@@ -136,7 +161,7 @@ export function setupHTest({sensorsEnabled, prepareAudio, beep}) {
     rates = [];
     status(next === 'arm-practice'
       ? 'Keep the leg still. Wait for the practice cue.'
-      : 'Practice captured. Return to rest and wait for the scored-set cue.');
+      : 'Practice complete. Keep the leg at rest and wait for the scored raises cue.');
   }
 
   function onPose(event) {
@@ -153,7 +178,7 @@ export function setupHTest({sensorsEnabled, prepareAudio, beep}) {
         status('Start position shifted after practice. Return to the original position or stop and remount.');
         return;
       }
-      detector = new Repetitions();
+      detector = phase === 'arm-practice' ? new Repetitions(10, 8) : new Repetitions();
       detector.push({time, angle: 0, offAxis: pose.offAxis});
       rates = [];
       phase = phase === 'arm-practice' ? 'practice' : 'scored';
@@ -174,15 +199,23 @@ export function setupHTest({sensorsEnabled, prepareAudio, beep}) {
     const rep = detector.push({time, angle, offAxis: pose.offAxis});
     if (!rep) return;
     if (phase === 'practice') {
-      draft.axis = resolveAxis(rep, rates);
-      draft.practiceFlags = draft.axis
-        ? addVelocity(rep, rates.map(rate => projectRate(rate, draft.axis))).flags
-        : [...rep.flags, 'Gyroscope axis or sign could not be verified'];
-      if (draft.practiceFlags.length) finish('Practice needs review · restart the set');
-      else arm('arm-scored', time);
+      const axis = resolveAxis(rep, rates);
+      const measured = axis ? addVelocity(rep, rates.map(rate => projectRate(rate, axis))) : null;
+      draft.axis = Number.isFinite(measured?.speed) ? axis : null;
+      draft.practiceFlags = measured?.flags ?? rep.flags;
+      draft.practiceGyroStatus = draft.axis ? 'Verified' : measured ? 'Insufficient gyro sampling or peak' : 'Axis unverified';
+      draft.practiceOffAxis = rep.offAxis;
+      draft.practiceOffAxisSpeed = measured?.offAxisSpeed;
+      if (rep.flags.includes('No return to baseline')) {
+        finish('Practice did not return to the start. Return the leg to rest and start a new set.');
+      } else {
+        arm('arm-scored', time);
+      }
       return;
     }
-    draft.reps.push(addVelocity(rep, rates.map(rate => projectRate(rate, draft.axis))));
+    draft.reps.push(draft.axis
+      ? addVelocity(rep, rates.map(rate => projectRate(rate, draft.axis)))
+      : addOrientationVelocity(rep));
     if (draft.reps.length === draft.target) {
       beep();
       finish('Complete');
@@ -202,6 +235,7 @@ export function setupHTest({sensorsEnabled, prepareAudio, beep}) {
       side: $('side').value, target: Number($('target').value), reps: [],
       practiceFlags: ['Practice not completed']};
     detector = null;
+    zero = undefined;
     arm('arm-practice', performance.now());
     controls();
     timer = setInterval(() => {
@@ -210,8 +244,10 @@ export function setupHTest({sensorsEnabled, prepareAudio, beep}) {
         finish('Interrupted · orientation stream gap');
       } else if (now > deadline) {
         finish(phase.startsWith('arm-')
-          ? 'Could not zero · check that the leg is still, the phone is screen-up and both sensors are available'
-          : 'Capture timed out');
+          ? 'Could not zero. Hold the leg still at the starting position and check sensor access.'
+          : phase === 'practice'
+            ? 'Practice raise was not detected. After the cue, lift the leg at least 10° and return to the start.'
+            : 'Capture timed out');
       }
     }, 200);
   });
@@ -219,11 +255,12 @@ export function setupHTest({sensorsEnabled, prepareAudio, beep}) {
   $('target').addEventListener('change', () => { $('protocol-note').hidden = $('target').value === '3'; });
   function reset(message) {
     draft = null;
+    zero = undefined;
     phase = 'idle';
     controls();
     status(message);
   }
-  $('discard').addEventListener('click', () => reset('Set discarded. Ready to arm a new practice.'));
+  $('discard').addEventListener('click', () => reset('Set discarded. Ready to start again.'));
   $('new').addEventListener('click', () => {
     session = id();
     try { localStorage.setItem(SESSION, session); }
@@ -278,4 +315,10 @@ export function setupHTest({sensorsEnabled, prepareAudio, beep}) {
     button.addEventListener('click', () => finish('Interrupted · changed screen')));
   controls();
   history();
+  return sample => {
+    const pitch = sample ? legPitch(sample.m).pitch : null;
+    const angle = pitch === null || zero === undefined ? pitch : wrap180(pitch - zero);
+    $('angle').textContent = number(angle);
+    $('angle-label').textContent = zero === undefined ? 'Live leg pitch relative to horizontal' : 'Live flexion relative to starting position';
+  };
 }

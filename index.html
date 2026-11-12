@@ -21,7 +21,7 @@
     <header class="app-header">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <div class="brand-copy"><div class="eyebrow">LIHPS · MOTION LAB</div><div class="brand-name">Motion<span>Angle</span></div></div>
-      <div class="version-chip">BETA 0.3</div>
+      <div class="version-chip">BETA 0.3.1</div>
     </header>
 
     <main>
@@ -122,12 +122,16 @@
           <p>Results estimate leg excursion relative to the starting position with the pelvis stabilised. Use within a clinician-supervised assessment. The app provides no return-to-sport decision.</p>
         </details>
         <div class="h-card">
+          <div class="h-live-angle">
+            <div><span id="h-angle">—</span><span class="metric-unit">°</span></div>
+            <div id="h-angle-label" class="display-label">Live leg pitch relative to horizontal</div>
+          </div>
           <div class="h-fields">
             <label>Tested leg <select id="h-side"><option>Left</option><option>Right</option></select></label>
             <label>Scored raises <select id="h-target"><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
           </div>
           <p id="h-protocol-note" class="section-note" hidden>Modified protocol (three scored raises is the default).</p>
-          <button class="primary-button full" id="h-start" type="button">Arm practice</button>
+          <button class="primary-button full" id="h-start" type="button">Start H-Test</button>
           <button class="secondary-button full" id="h-stop" type="button" hidden>Stop capture</button>
           <p id="h-status" class="notice quality" role="status">Enable sensors, complete the passive assessment and keep the leg still at the start.</p>
           <form id="h-review" hidden>
@@ -152,11 +156,12 @@
           </form>
         </div>
         <div class="h-card">
-          <h2>Saved H-Test sets</h2>
+          <h2 id="h-history-title" tabindex="-1">Saved H-Test sets</h2>
           <div class="records-actions">
             <button class="secondary-button" id="h-new" type="button">New session</button>
             <button class="primary-button" id="h-export" type="button">Export H-Test CSV</button>
           </div>
+          <p id="h-history-status" class="section-note h-history-status" role="status"></p>
           <div id="h-history"></div>
         </div>
       </section>
@@ -180,7 +185,7 @@
           <div class="diagnostic-row"><span>Orientation absolute flag</span><b id="diag-absolute">—</b></div>
           <div class="diagnostic-row"><span>Screen tilt</span><b id="diag-tilt">—</b></div>
           <div class="diagnostic-row"><span>Observed heading spread (10 s)</span><b id="diag-jitter">—</b></div>
-          <div class="diagnostic-row"><span>App / data version</span><b>0.3.0 / 1</b></div>
+          <div class="diagnostic-row"><span>App / data version</span><b>0.3.1 / 1</b></div>
         </div>
         <button class="secondary-button full" type="button" id="enable-again">Request sensor access</button>
         <div class="howto"><h2>Positioning: trunk rotation</h2><p>Seated. Screen facing upward. Place one long edge of the iPhone against the sternum. Keep the device against the thorax and minimise independent arm movement. Stabilise the pelvis according to your protocol.</p><h2>Interpretation</h2><p>The trunk mode measures rotation of the phone's long axis projected onto the horizontal plane. It does not measure thorax–pelvis separation. Joint ROM from zero describes phone orientation, not automatically anatomical joint angles.</p><h2>Sensor limitations</h2><p>Web APIs may use an arbitrary or magnetic orientation reference, update at varying rates, and be suspended when the app is backgrounded. A tilt warning threshold of 15° is a configurable engineering heuristic, not an established clinical cut-off.</p></div>

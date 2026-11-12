@@ -42,7 +42,16 @@ export function projectRate(rate, {channel, sign}) {
     other: Math.hypot(...AXES.filter(axis => axis !== channel).map(axis => rate[axis]))};
 }
 
+const OFF_AXIS_FLAGS = ['Off-axis orientation', 'Off-axis rotation'];
+export const captureFlags = flags => flags.filter(flag => !OFF_AXIS_FLAGS.includes(flag));
+
 export class Repetitions {
+  constructor(minPeak = 20, onset = 10) {
+    this.minPeak = minPeak;
+    this.onset = onset;
+  }
+
+  leadIn = [];
   active = null;
   reps = [];
   last = null;
@@ -54,26 +63,34 @@ export class Repetitions {
     this.last = sample;
     if (!this.active) {
       if (Math.abs(angle) <= 6) this.rest = true;
-      if (!this.rest || angle < 10) return null;
+      if (!this.rest) return null;
+      if (angle < this.onset) {
+        this.leadIn = [...this.leadIn.filter(pose => time - pose.time < 100), sample];
+        return null;
+      }
       this.rest = false;
-      this.active = {start: previous?.time ?? time, samples: 0, peak: 0, offAxis: 0, gap: 0};
+      this.active = {start: previous?.time ?? time, samples: 0, peak: 0, offAxis: 0, gap: 0, trace: this.leadIn};
+      this.leadIn = [];
     }
     const rep = this.active;
     rep.samples++;
+    rep.trace.push(sample);
     if (angle > rep.peak) {
       rep.peak = angle;
       rep.peakTime = time;
     }
     rep.offAxis = Math.max(rep.offAxis, offAxis);
     rep.gap = Math.max(rep.gap, previous ? time - previous.time : 0);
-    if (angle > 6 && time - rep.start < 5000) return null;
+    const returned = Math.abs(angle) <= 6;
+    if (!returned && time - rep.start < 5000) return null;
     this.active = null;
-    this.rest = Math.abs(angle) <= 6;
-    if (rep.peak < 20 && time - rep.start < 5000) return null;
+    this.rest = returned;
+    if (returned) this.leadIn = [sample];
+    if (rep.peak < this.minPeak && returned) return null;
     const duration = time - rep.start;
     const flags = [];
-    if (angle > 6) flags.push('No return to baseline');
-    if (rep.peak < 20) flags.push('Small excursion');
+    if (!returned) flags.push('No return to baseline');
+    if (rep.peak < this.minPeak) flags.push('Small excursion');
     if (rep.offAxis > 15) flags.push('Off-axis orientation');
     if (rep.gap > 100) flags.push('Orientation gap');
     if (rep.samples * 1000 / duration < 30 || rep.samples < 5) flags.push('Sparse orientation');
@@ -83,7 +100,7 @@ export class Repetitions {
   }
 }
 
-export function addVelocity(rep, rates) {
+export function addVelocity({trace, ...rep}, rates) {
   const inside = rates.filter(rate => rate.time >= rep.start && rate.time <= rep.end);
   const peak = inside.reduce((max, rate) => rate.time <= rep.peakTime + 40 ? Math.max(max, rate.flexion) : max, 0);
   const times = [rep.start, ...inside.map(rate => rate.time), rep.end];
@@ -91,22 +108,45 @@ export function addVelocity(rep, rates) {
   const hz = inside.length * 1000 / rep.duration;
   const flags = [...rep.flags];
   if (hz < 30 || gap > 100) flags.push('Sparse gyroscope');
-  if (inside.some(rate => rate.other > Math.max(60, peak * 0.3))) flags.push('Off-axis rotation');
+  const offAxisSpeed = inside.length ? inside.reduce((max, rate) => Math.max(max, rate.other), 0) : null;
+  if (offAxisSpeed > Math.max(60, peak * 0.3)) flags.push('Off-axis rotation');
   if (!peak) flags.push('No positive gyroscope peak');
-  return {...rep, flags, gyroHz: hz, gyroGap: gap, speed: hz >= 30 && gap <= 100 && peak > 0 ? peak : null};
+  return {...rep, flags, gyroHz: hz, gyroGap: gap, offAxisSpeed,
+    speed: hz >= 30 && gap <= 100 && peak > 0 ? peak : null, speedSource: 'gyroscope'};
+}
+
+export function addOrientationVelocity({trace, ...rep}) {
+  const flags = [...rep.flags];
+  let peak = 0;
+  if (!flags.includes('Orientation gap') && !flags.includes('Sparse orientation')) {
+    // Use 30–65 ms slopes during ascent to limit noise from frame-to-frame changes.
+    for (let i = 1; i < trace.length && trace[i].time <= rep.peakTime; i++) {
+      const end = trace[i];
+      for (let j = i - 1; j >= 0; j--) {
+        const start = trace[j];
+        const span = end.time - start.time;
+        if (span < 30) continue;
+        if (span <= 65) peak = Math.max(peak, 1000 * (end.angle - start.angle) / span);
+        break;
+      }
+    }
+  }
+  if (!peak) flags.push('Orientation velocity unavailable');
+  return {...rep, flags, speed: peak || null, speedSource: 'orientation'};
 }
 
 export function stableZero(samples, rates, now) {
   if (samples.length < 12 || samples[0].time > now - 450 || samples.at(-1).time < now - 100) return null;
-  if (rates.length < 12 || rates[0].time > now - 450 || rates.at(-1).time < now - 100) return null;
   if (rates.some(rate => Math.hypot(rate.alpha, rate.beta, rate.gamma) > 12)) return null;
   const zero = samples[0].pitch;
-  if (Math.abs(zero) > 30 || samples.some(sample => sample.offAxis > 15 || Math.abs(wrap180(sample.pitch - zero)) > 3)) return null;
+  const tilt = samples[0].offAxis;
+  if (Math.abs(zero) > 30 || tilt >= 70 || samples.some(sample =>
+    Math.abs(sample.offAxis - tilt) > 3 || Math.abs(wrap180(sample.pitch - zero)) > 3)) return null;
   return zero + samples.reduce((sum, sample) => sum + wrap180(sample.pitch - zero), 0) / samples.length;
 }
 
 export function summary(reps) {
-  const valid = reps.filter(rep => !rep.flags.length && Number.isFinite(rep.speed));
+  const valid = reps.filter(rep => !captureFlags(rep.flags).length && Number.isFinite(rep.speed));
   const values = key => valid.map(rep => rep[key]);
   const mean = xs => xs.length ? xs.reduce((a,b) => a+b, 0) / xs.length : null;
   const max = xs => xs.length ? Math.max(...xs) : null;

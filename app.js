@@ -4,7 +4,7 @@ import {
   circularMeanDegrees, circularSpreadDegrees, wrap180, quatNormalize
 } from './math.js';
 
-/* LIHPS Motion Angle PWA — 0.3.0
+/* LIHPS Motion Angle PWA — 0.3.1
    Research prototype. Web orientation is not interchangeable with native Core Motion.
    Every incoming orientation sample is processed before the throttled UI refresh. */
 const $=id=>document.getElementById(id);
@@ -31,6 +31,7 @@ let screen='trunk',tool='inclinometer',direction='unspecified',inclinoEdge='long
 let enabled=false,permissionRequested=false,orientationSeen=false,sensorError='';
 let latest=null,previousSample=null,sampleTimes=[],recentHeading=[];
 let lastRendered=0,renderPending=false;
+let renderHTestAngle;
 let recentOrientations=[];
 let audio=null;
 const trunk={phase:'ready',baseline:null,lastHeading:null,lastTime:null,current:0,peak:0,signedPeak:0,maxTilt:0,started:0,zeroStarted:0,result:null,zeroSamples:[]};
@@ -42,7 +43,7 @@ function readStorage(key,fallback){try{const x=localStorage.getItem(key);return 
 function writeStorage(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true;}catch{setWarning('Local storage is unavailable or full. Export your measurements now; further trials may not be saved.');return false;}}
 function setWarning(message){warning=message;const el=$('global-warning');el.textContent=message;el.hidden=!message;}
 function clearWarning(){setWarning('');}
-function saveRecord(type,data){const entry={id:Date.now()+'-'+Math.random().toString(36).slice(2,8),time:new Date().toISOString(),sessionId,type,version:'0.3.0',...data};
+function saveRecord(type,data){const entry={id:Date.now()+'-'+Math.random().toString(36).slice(2,8),time:new Date().toISOString(),sessionId,type,version:'0.3.1',...data};
   records.unshift(entry);if(records.length>MAX_RECORDS)records.length=MAX_RECORDS;
   const ok=writeStorage(RECORD_KEY,records);if(!ok)entry.notSaved=true;
   renderRecords();renderTrunkSession();return entry;
@@ -247,6 +248,7 @@ function renderLive(){updatePermissionBanner();const active=sensorFresh();
   $('segments-proximal').textContent=segments.proximal?signed(segments.proximal.angle):'—';
   $('segments-distal').textContent=segments.distal?signed(segments.distal.angle):'—';
   if(screen==='info')renderDiagnostics();
+  if(screen==='askling')renderHTestAngle(active ? latest : null);
 }
 function escapeCsv(v){if(v===null||v===undefined)return '';const s=String(v);return /[",\r\n]/.test(s)?`"${s.replaceAll('"','""')}"`:s;}
 function exportCsv(){if(!records.length){setWarning('No records to export yet.');return;}
@@ -277,7 +279,7 @@ function wireUI(){
   document.querySelectorAll('#inclino-edge [data-edge]').forEach(el=>el.addEventListener('click',()=>{inclinoEdge=el.dataset.edge;chooseInGroup('#inclino-edge [data-edge]','edge',inclinoEdge);renderLive();}));
   document.querySelectorAll('#segment-edge [data-edge]').forEach(el=>el.addEventListener('click',()=>{if(segments.stage===1)return setWarning('Finish or reset the two-segment measurement before changing edge.');segmentEdge=el.dataset.edge;chooseInGroup('#segment-edge [data-edge]','edge',segmentEdge);renderLive();}));
   window.addEventListener('deviceorientation',onOrientation,true);
-  setupHTest({sensorsEnabled: () => enabled, prepareAudio, beep});
+  renderHTestAngle=setupHTest({sensorsEnabled: () => enabled, prepareAudio, beep});
   document.addEventListener('visibilitychange',()=>{if(document.hidden)interruptActiveTrials('The app was backgrounded; active trials were discarded to prevent sensor gaps.');});
   window.addEventListener('pagehide',()=>interruptActiveTrials());
   window.setInterval(()=>{if(enabled&&orientationSeen&&!sensorFresh()){interruptActiveTrials('Sensor stream stopped; repeat the interrupted measurement.');}
