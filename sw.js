@@ -1,6 +1,6 @@
 /* Offline asset cache. Bump cache version whenever an application file changes. */
-const CACHE_NAME='lihps-motion-h-test-static-v0.3.1';
-const CORE=['./','./index.html','./styles.css','./app.js','./math.js','./h-test.js','./h-math.js','./manifest.webmanifest','./icons/icon-180.png','./icons/icon-192.png','./icons/icon-512.png','./icons/icon-maskable-512.png'];
+const CACHE_NAME='lihps-motion-h-test-static-v0.4.0';
+const CORE=['./','./index.html','./styles.css','./app.js','./math.js','./cue.js','./h-test.js','./h-math.js','./manifest.webmanifest','./icons/icon-180.png','./icons/icon-192.png','./icons/icon-512.png','./icons/icon-maskable-512.png'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(CORE.map(file => new Request(file, {cache: 'reload'})))).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',event=>{event.waitUntil(Promise.all([
   caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('lihps-motion-h-test-')&&k!==CACHE_NAME).map(k=>caches.delete(k)))),

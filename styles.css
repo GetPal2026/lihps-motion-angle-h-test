@@ -25,3 +25,6 @@
 .h-live-angle #h-angle{font-size:clamp(42px,12vw,64px);font-weight:850;letter-spacing:-.045em;font-variant-numeric:tabular-nums}
 .h-live-angle .metric-unit{font-size:25px}
 .h-history-status:empty{margin:0}
+.h-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.h-table-scroll .h-table{min-width:870px}
+.h-table-scroll th,.h-table-scroll td{vertical-align:top}

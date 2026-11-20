@@ -1,5 +1,9 @@
 import {deg, wrap180} from './math.js';
 
+// Provisional engineering limits for browser-delivered samples, not clinical cut-offs.
+export const MIN_SAMPLE_HZ = 30;
+export const MAX_SAMPLE_GAP_MS = 50;
+
 export function legPitch(matrix) {
   const [x, y, z] = matrix[2];
   return {pitch: deg(Math.atan2(y, z)), offAxis: deg(Math.asin(Math.min(1, Math.abs(x))))};
@@ -12,9 +16,23 @@ export function angularRate(event) {
 
 const AXES = ['alpha', 'beta', 'gamma'];
 
+export function samplingStats(samples, start, end) {
+  const times = samples.map(sample => sample.time).filter(time => time >= start && time <= end);
+  let largestGap = times.length ? Math.max(times[0] - start, end - times.at(-1)) : end - start;
+  let ordered = true;
+  for (let i = 1; i < times.length; i++) {
+    const interval = times[i] - times[i - 1];
+    if (interval <= 0) ordered = false;
+    largestGap = Math.max(largestGap, interval);
+  }
+  const span = times.at(-1) - times[0];
+  const hz = times.length >= 2 && span > 0 && ordered ? (times.length - 1) * 1000 / span : null;
+  return {count: times.length, hz, minHz: largestGap > 0 ? 1000 / largestGap : null, gap: largestGap};
+}
+
 export function resolveAxis(rep, rates) {
-  // Compare device-motion channels against the known positive orientation change
-  // during practice. Browser axis naming has varied across implementations.
+  // Match gyroscope channels to the first recorded raise that supports verification.
+  // This raise contributes to the results, including when verification fails.
   const motion = rates.filter(rate => rate.time >= rep.start && rate.time <= rep.end);
   const integrate = (channel, start, end) => {
     let total = 0;
@@ -46,11 +64,6 @@ const OFF_AXIS_FLAGS = ['Off-axis orientation', 'Off-axis rotation'];
 export const captureFlags = flags => flags.filter(flag => !OFF_AXIS_FLAGS.includes(flag));
 
 export class Repetitions {
-  constructor(minPeak = 20, onset = 10) {
-    this.minPeak = minPeak;
-    this.onset = onset;
-  }
-
   leadIn = [];
   active = null;
   reps = [];
@@ -64,58 +77,62 @@ export class Repetitions {
     if (!this.active) {
       if (Math.abs(angle) <= 6) this.rest = true;
       if (!this.rest) return null;
-      if (angle < this.onset) {
+      if (angle < 10) {
         this.leadIn = [...this.leadIn.filter(pose => time - pose.time < 100), sample];
         return null;
       }
       this.rest = false;
-      this.active = {start: previous?.time ?? time, samples: 0, peak: 0, offAxis: 0, gap: 0, trace: this.leadIn};
+      this.active = {start: previous?.time ?? time, peak: 0, offAxis: 0, trace: this.leadIn};
+      if (previous && this.active.trace.at(-1)?.time !== previous.time) this.active.trace.push(previous);
       this.leadIn = [];
     }
     const rep = this.active;
-    rep.samples++;
     rep.trace.push(sample);
     if (angle > rep.peak) {
       rep.peak = angle;
       rep.peakTime = time;
     }
     rep.offAxis = Math.max(rep.offAxis, offAxis);
-    rep.gap = Math.max(rep.gap, previous ? time - previous.time : 0);
     const returned = Math.abs(angle) <= 6;
     if (!returned && time - rep.start < 5000) return null;
     this.active = null;
     this.rest = returned;
     if (returned) this.leadIn = [sample];
-    if (rep.peak < this.minPeak && returned) return null;
+    if (rep.peak < 20 && returned) return null;
     const duration = time - rep.start;
+    const sampling = samplingStats(rep.trace, rep.start, time);
     const flags = [];
     if (!returned) flags.push('No return to baseline');
-    if (rep.peak < this.minPeak) flags.push('Small excursion');
+    if (rep.peak < 20) flags.push('Small excursion');
     if (rep.offAxis > 15) flags.push('Off-axis orientation');
-    if (rep.gap > 100) flags.push('Orientation gap');
-    if (rep.samples * 1000 / duration < 30 || rep.samples < 5) flags.push('Sparse orientation');
-    const result = {...rep, end: time, duration, flags};
+    if (sampling.gap > MAX_SAMPLE_GAP_MS) flags.push('Orientation gap');
+    if (sampling.hz === null || sampling.hz < MIN_SAMPLE_HZ || sampling.count < 5) flags.push('Sparse orientation');
+    const result = {...rep, end: time, duration, flags, samples: sampling.count,
+      orientationHz: sampling.hz, orientationMinHz: sampling.minHz, gap: sampling.gap};
     this.reps.push(result);
     return result;
   }
 }
 
+function gyroMetrics(rep, rates) {
+  const stats = samplingStats(rates, rep.start, rep.end);
+  return {gyroSamples: stats.count, gyroHz: stats.hz, gyroMinHz: stats.minHz, gyroGap: stats.gap};
+}
+
 export function addVelocity({trace, ...rep}, rates) {
   const inside = rates.filter(rate => rate.time >= rep.start && rate.time <= rep.end);
   const peak = inside.reduce((max, rate) => rate.time <= rep.peakTime + 40 ? Math.max(max, rate.flexion) : max, 0);
-  const times = [rep.start, ...inside.map(rate => rate.time), rep.end];
-  const gap = Math.max(...times.slice(1).map((time, index) => time - times[index]));
-  const hz = inside.length * 1000 / rep.duration;
+  const sampling = gyroMetrics(rep, rates);
   const flags = [...rep.flags];
-  if (hz < 30 || gap > 100) flags.push('Sparse gyroscope');
+  if (sampling.gyroHz === null || sampling.gyroHz < MIN_SAMPLE_HZ || sampling.gyroSamples < 5) flags.push('Sparse gyroscope');
+  if (sampling.gyroGap > MAX_SAMPLE_GAP_MS) flags.push('Gyroscope gap');
   const offAxisSpeed = inside.length ? inside.reduce((max, rate) => Math.max(max, rate.other), 0) : null;
   if (offAxisSpeed > Math.max(60, peak * 0.3)) flags.push('Off-axis rotation');
   if (!peak) flags.push('No positive gyroscope peak');
-  return {...rep, flags, gyroHz: hz, gyroGap: gap, offAxisSpeed,
-    speed: hz >= 30 && gap <= 100 && peak > 0 ? peak : null, speedSource: 'gyroscope'};
+  return {...rep, ...sampling, flags, offAxisSpeed, speed: peak || null, speedSource: 'gyroscope'};
 }
 
-export function addOrientationVelocity({trace, ...rep}) {
+export function addOrientationVelocity({trace, ...rep}, rates = []) {
   const flags = [...rep.flags];
   let peak = 0;
   if (!flags.includes('Orientation gap') && !flags.includes('Sparse orientation')) {
@@ -132,7 +149,17 @@ export function addOrientationVelocity({trace, ...rep}) {
     }
   }
   if (!peak) flags.push('Orientation velocity unavailable');
-  return {...rep, flags, speed: peak || null, speedSource: 'orientation'};
+  return {...rep, ...gyroMetrics(rep, rates), flags, speed: peak || null, speedSource: 'orientation'};
+}
+
+export function measureRep(rep, rates, knownAxis) {
+  const gyro = samplingStats(rates, rep.start, rep.end);
+  const canVerify = gyro.hz >= MIN_SAMPLE_HZ && gyro.count >= 5 && gyro.gap <= MAX_SAMPLE_GAP_MS;
+  const axis = knownAxis ?? (canVerify ? resolveAxis(rep, rates) : null);
+  const result = axis
+    ? addVelocity(rep, rates.map(rate => projectRate(rate, axis)))
+    : addOrientationVelocity(rep, rates);
+  return {...result, axis};
 }
 
 export function stableZero(samples, rates, now) {
@@ -145,11 +172,31 @@ export function stableZero(samples, rates, now) {
   return zero + samples.reduce((sum, sample) => sum + wrap180(sample.pitch - zero), 0) / samples.length;
 }
 
-export function summary(reps) {
-  const valid = reps.filter(rep => !captureFlags(rep.flags).length && Number.isFinite(rep.speed));
-  const values = key => valid.map(rep => rep[key]);
+export function romUsable(rep) {
+  return Number.isFinite(rep.peak) && !captureFlags(rep.flags).some(flag =>
+    ['No return to baseline', 'Small excursion', 'Orientation gap', 'Sparse orientation'].includes(flag));
+}
+
+export function speedUsable(rep) {
+  return romUsable(rep) && Number.isFinite(rep.speed) && !captureFlags(rep.flags).length;
+}
+
+export function selectedReps(reps, mode = 'all') {
+  const indices = reps.map((_, index) => index);
+  if (mode === 'last3') return indices.slice(-3);
+  if (mode === 'fastest3') return indices.filter(index => speedUsable(reps[index]))
+    .sort((a,b) => reps[b].speed - reps[a].speed || a - b).slice(0, 3).sort((a,b) => a - b);
+  if (mode === 'rom3') return indices.filter(index => romUsable(reps[index]))
+    .sort((a,b) => reps[b].peak - reps[a].peak || a - b).slice(0, 3).sort((a,b) => a - b);
+  return indices;
+}
+
+export function summary(reps, mode = 'all') {
+  const selected = selectedReps(reps, mode);
+  const rom = selected.map(index => reps[index]).filter(romUsable).map(rep => rep.peak);
+  const speed = selected.map(index => reps[index]).filter(speedUsable).map(rep => rep.speed);
   const mean = xs => xs.length ? xs.reduce((a,b) => a+b, 0) / xs.length : null;
   const max = xs => xs.length ? Math.max(...xs) : null;
-  return {valid: valid.length, bestRom: max(values('peak')), meanRom: mean(values('peak')),
-    bestSpeed: max(values('speed')), meanSpeed: mean(values('speed'))};
+  return {selected, validRom: rom.length, valid: speed.length,
+    bestRom: max(rom), meanRom: mean(rom), bestSpeed: max(speed), meanSpeed: mean(speed)};
 }

@@ -1,10 +1,11 @@
+import {playCue} from './cue.js';
 import {setupHTest} from './h-test.js';
 import {
   validOrientation, orientationSample, gravityInclinometer, relativeRotation,
   circularMeanDegrees, circularSpreadDegrees, wrap180, quatNormalize
 } from './math.js';
 
-/* LIHPS Motion Angle PWA — 0.3.1
+/* LIHPS Motion Angle PWA — 0.4.0
    Research prototype. Web orientation is not interchangeable with native Core Motion.
    Every incoming orientation sample is processed before the throttled UI refresh. */
 const $=id=>document.getElementById(id);
@@ -43,7 +44,7 @@ function readStorage(key,fallback){try{const x=localStorage.getItem(key);return 
 function writeStorage(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true;}catch{setWarning('Local storage is unavailable or full. Export your measurements now; further trials may not be saved.');return false;}}
 function setWarning(message){warning=message;const el=$('global-warning');el.textContent=message;el.hidden=!message;}
 function clearWarning(){setWarning('');}
-function saveRecord(type,data){const entry={id:Date.now()+'-'+Math.random().toString(36).slice(2,8),time:new Date().toISOString(),sessionId,type,version:'0.3.1',...data};
+function saveRecord(type,data){const entry={id:Date.now()+'-'+Math.random().toString(36).slice(2,8),time:new Date().toISOString(),sessionId,type,version:'0.4.0',...data};
   records.unshift(entry);if(records.length>MAX_RECORDS)records.length=MAX_RECORDS;
   const ok=writeStorage(RECORD_KEY,records);if(!ok)entry.notSaved=true;
   renderRecords();renderTrunkSession();return entry;
@@ -105,8 +106,15 @@ function setTool(target){if(tool===target)return;interruptActiveTrials('The acti
   document.querySelectorAll('[data-tool]').forEach(el=>{const b=el.dataset.tool===tool;el.classList.toggle('selected',b);el.setAttribute('aria-pressed',String(b));});renderLive();
 }
 function chooseInGroup(selector,attribute,value){document.querySelectorAll(selector).forEach(el=>{const chosen=el.dataset[attribute]===value;el.classList.toggle('selected',chosen);el.setAttribute('aria-pressed',String(chosen));});}
-function beep(){try{if(!audio)return;const o=audio.createOscillator(),g=audio.createGain();o.type='sine';o.frequency.value=830;g.gain.value=.065;o.connect(g);g.connect(audio.destination);const t=audio.currentTime;g.gain.setValueAtTime(.06,t);g.gain.exponentialRampToValueAtTime(.0001,t+.11);o.start(t);o.stop(t+.12);}catch{}}
-function prepareAudio(){try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;if(!audio)audio=new C();if(audio.state==='suspended')audio.resume().catch(()=>{});}catch{}}
+function beep(){try{playCue(audio);}catch{}}
+async function prepareAudio(){
+  try {
+    const C=window.AudioContext||window.webkitAudioContext;
+    if(!C)return;
+    if(!audio||audio.state==='closed')audio=new C();
+    if(audio.state!=='running')await audio.resume();
+  }catch{}
+}
 function vibrate(){if(navigator.vibrate)try{navigator.vibrate(45);}catch{}}
 function startTrunk(){if(!sensorFresh()){setWarning('No fresh orientation samples. Enable sensor access and try again.');return;}
   clearWarning();prepareAudio();Object.assign(trunk,{phase:'zeroing',baseline:null,lastHeading:null,lastTime:null,current:0,peak:0,signedPeak:0,maxTilt:0,started:0,zeroStarted:performance.now(),result:null,zeroSamples:[]});renderLive();
